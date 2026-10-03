@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Админка — Эвакуатор 32</title>
+<style>
+  :root { --red:#e11d2e; --ink:#14171a; --muted:#6b7480; --line:#e3e6ea; --bg:#f4f6f8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; font-size:15px; line-height:1.5; }
+  a { color:var(--red); }
+  header { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:14px; padding:12px 20px; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  header .who { font-size:12px; color:var(--muted); }
+  main { max-width:960px; margin:0 auto; padding:22px 16px 90px; }
+  .tabs { display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap; }
+  .tab { border:1px solid var(--line); background:#fff; border-radius:999px; padding:8px 16px; cursor:pointer; font-weight:600; }
+  .tab.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  fieldset { border:1px solid var(--line); border-radius:14px; background:#fff; margin:0 0 16px; padding:14px 16px 16px; }
+  legend { font-weight:800; font-size:14px; padding:0 6px; }
+  label { display:block; font-size:12px; font-weight:700; color:var(--muted); margin:12px 0 4px; }
+  input[type=text], input[type=number], textarea {
+    width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; color:inherit; background:#fff; }
+  textarea { min-height:70px; resize:vertical; }
+  input:focus, textarea:focus { outline:2px solid var(--red); outline-offset:1px; border-color:var(--red); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .item { border:1px dashed var(--line); border-radius:12px; padding:10px 12px 14px; margin:10px 0; background:#fbfcfd; }
+  .item-head { display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:13px; }
+  .btn { border:0; border-radius:10px; padding:10px 16px; font:inherit; font-weight:700; cursor:pointer; background:#eef1f4; color:var(--ink); }
+  .btn.primary { background:var(--red); color:#fff; }
+  .btn.ghost { background:transparent; border:1px solid var(--line); }
+  .btn.sm { padding:6px 10px; font-size:13px; }
+  .bar { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--line);
+         padding:12px 20px; display:flex; gap:12px; align-items:center; justify-content:flex-end; }
+  .bar .status { margin-right:auto; font-size:13px; color:var(--muted); }
+  .thumb { width:120px; height:80px; object-fit:cover; border-radius:10px; border:1px solid var(--line); display:block; margin:6px 0; background:#eef1f4; }
+  .imgrow { display:flex; gap:12px; align-items:flex-end; }
+  .imgrow > div { flex:1; }
+  .login { max-width:560px; margin:8vh auto; background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px; }
+  .login h2 { margin:0 0 6px; }
+  .login ol { padding-left:20px; color:var(--muted); font-size:14px; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:80px; background:var(--ink); color:#fff;
+           padding:10px 18px; border-radius:999px; font-size:14px; opacity:0; pointer-events:none; transition:.2s; }
+  .toast.on { opacity:1; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 0; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Админка · Эвакуатор 32</h1>
+  <span class="who" id="who"></span>
+  <button class="btn ghost sm" id="logout" hidden>Выйти</button>
+</header>
+<main id="app"></main>
+<div class="bar" id="bar" hidden>
+  <span class="status" id="status"></span>
+  <button class="btn primary" id="save">Сохранить и опубликовать</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Настройки репозитория ───────────────────────────────────────────────────
+const OWNER = 'ludmilakulesova158-hue';
+const REPO = 'evakuator-bryansk';
+const BRANCH = 'main';
+
+// Админка лежит по адресу <base>/admin/ (на Pages — /evakuator-demo/admin/),
+// а в данных пути к фото хранятся от корня сайта: /images/.... В браузере такой
+// путь уходит на корень домена и картинка не грузится, поэтому подставляем base.
+// scripts/fix-base.mjs тут не помогает: <img> создаётся в JS уже в браузере.
+const BASE = location.pathname.replace(/\/admin\/?$/, '');
+const imgUrl = (p) => {
+  if (!p) return '';
+  if (/^(?:[a-z]+:)?\/\//i.test(p) || p.startsWith('data:')) return p;
+  return BASE + (p.startsWith('/') ? p : '/' + p);
+};
+
+// ── Какие данные редактируем ────────────────────────────────────────────────
+const DOCS = [
+  {
+    id: 'home', label: 'Главная страница', file: 'src/data/home.json',
+    fields: [
+      { key: 'hero', label: 'Первый экран', type: 'group', fields: [
+        { key: 'title', label: 'Заголовок', type: 'text' },
+        { key: 'subtitle', label: 'Подзаголовок', type: 'textarea' },
+        { key: 'image', label: 'Фото', type: 'image' },
+        { key: 'imageAlt', label: 'Описание фото (для поиска)', type: 'text' },
+        { key: 'bullets', label: 'Преимущества (галочки)', type: 'list', item: { type: 'text' } },
+      ]},
+      { key: 'tehnika', label: 'Блок «Что перевозим»', type: 'group', fields: [
+        { key: 'title', label: 'Заголовок блока', type: 'text' },
+        { key: 'lead', label: 'Подзаголовок', type: 'textarea' },
+        { key: 'items', label: 'Карточки', type: 'list', item: { fields: [
+          { key: 'image', label: 'Фото', type: 'image' },
+          { key: 'title', label: 'Название', type: 'text' },
+          { key: 'link', label: 'Ссылка на услугу (например /uslugi/mototehnika/)', type: 'text' },
+        ]}},
+      ]},
+      { key: 'uslugi', label: 'Блок «Услуги»', type: 'group', fields: [
+        { key: 'title', label: 'Заголовок блока', type: 'text' },
+        { key: 'lead', label: 'Подзаголовок', type: 'textarea' },
+        { key: 'items', label: 'Карточки услуг', type: 'list', item: { fields: [
+          { key: 'image', label: 'Фото', type: 'image' },
+          { key: 'title', label: 'Название', type: 'text' },
+          { key: 'text', label: 'Текст', type: 'textarea' },
+          { key: 'link', label: 'Ссылка (например /uslugi/nizkij-klirens/)', type: 'text' },
+        ]}},
+      ]},
+      { key: 'gallery', label: 'Галерея «Фото наших работ»', type: 'group', fields: [
+        { key: 'title', label: 'Заголовок блока', type: 'text' },
+        { key: 'lead', label: 'Подзаголовок', type: 'textarea' },
+        { key: 'items', label: 'Фото', type: 'list', item: { fields: [
+          { key: 'image', label: 'Фото', type: 'image' },
+          { key: 'alt', label: 'Описание (для поиска)', type: 'text' },
+          { key: 'w', label: 'Ширина, px', type: 'number' },
+          { key: 'h', label: 'Высота, px', type: 'number' },
+        ]}},
+      ]},
+      { key: 'cta', label: 'Призыв внизу страницы', type: 'group', fields: [
+        { key: 'title', label: 'Заголовок', type: 'text' },
+        { key: 'text', label: 'Текст', type: 'textarea' },
+      ]},
+      { key: 'faq', label: 'Частые вопросы', type: 'list', item: { fields: [
+        { key: 'q', label: 'Вопрос', type: 'text' },
+        { key: 'a', label: 'Ответ', type: 'textarea' },
+      ]}},
+    ],
+  },
+  {
+    id: 'site', label: 'Контакты и цены', file: 'src/data/site.json',
+    fields: [
+      { key: 'site', label: 'Общие данные', type: 'group', fields: [
+        { key: 'name', label: 'Название', type: 'text' },
+        { key: 'tagline', label: 'Подпись (город)', type: 'text' },
+        { key: 'city', label: 'Город', type: 'text' },
+        { key: 'region', label: 'Регион', type: 'text' },
+        { key: 'regionCode', label: 'Код региона', type: 'text' },
+        { key: 'experienceYears', label: 'Опыт, лет', type: 'number' },
+        { key: 'defaultTitle', label: 'Заголовок страницы (title)', type: 'text' },
+        { key: 'defaultDescription', label: 'Описание страницы (description)', type: 'textarea' },
+      ]},
+      { key: 'contacts', label: 'Контакты', type: 'group', fields: [
+        { key: 'phoneDisplay', label: 'Телефон мобильный (кнопки, MAX)', type: 'text' },
+        { key: 'phoneHref', label: 'Мобильный для звонка (+ и цифры)', type: 'text' },
+        { key: 'phoneCityDisplay', label: 'Телефон городской (шапка, подвал)', type: 'text' },
+        { key: 'phoneCityHref', label: 'Городской для звонка (+ и цифры)', type: 'text' },
+        { key: 'maxUrl', label: 'Ссылка на чат MAX (пусто = собрать из номера)', type: 'text' },
+        { key: 'maxLabel', label: 'Подпись кнопки MAX', type: 'text' },
+        { key: 'email', label: 'Почта', type: 'text' },
+        { key: 'address', label: 'Адрес', type: 'text' },
+        { key: 'hours', label: 'Часы работы', type: 'text' },
+        { key: 'payment', label: 'Оплата', type: 'text' },
+      ]},
+      { key: 'legal', label: 'Реквизиты (для политики ПДн)', type: 'group', fields: [
+        { key: 'operatorType', label: 'Тип оператора', type: 'text' },
+        { key: 'fullName', label: 'ФИО', type: 'text' },
+        { key: 'address', label: 'Адрес', type: 'text' },
+        { key: 'email', label: 'Почта', type: 'text' },
+      ]},
+      { key: 'prices', label: 'Цены', type: 'list', item: { fields: [
+        { key: 'id', label: 'Код (sedan/suv/truck/moto)', type: 'text' },
+        { key: 'title', label: 'Название', type: 'text' },
+        { key: 'price', label: 'Цена', type: 'text' },
+        { key: 'note', label: 'Примечание', type: 'textarea' },
+        { key: 'icon', label: 'Иконка', type: 'text' },
+      ]}},
+      { key: 'extraServices', label: 'Дополнительные услуги', type: 'list', item: { fields: [
+        { key: 'title', label: 'Услуга', type: 'text' },
+        { key: 'price', label: 'Цена', type: 'text' },
+        { key: 'link', label: 'Ссылка на услугу (например /uslugi/mezhgorod/)', type: 'text' },
+      ]}},
+    ],
+  },
+];
+
+// ── Утилиты ─────────────────────────────────────────────────────────────────
+const $ = (s, r = document) => r.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    // Обработчики (onclick и т. п.) обязаны ставится свойством, а не атрибутом:
+    // setAttribute превращает функцию в строку, и кнопка молча перестаёт работать.
+    if (k === 'class') n.className = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (typeof v === 'function') n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const kid of kids) n.append(kid);
+  return n;
+};
+const toast = (msg) => { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2600); };
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'foto';
+const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
+const unb64 = (s) => decodeURIComponent(escape(atob(s.replace(/\s/g, ''))));
+const fileToB64 = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+
+let token = localStorage.getItem('gh_token') || '';
+let state = {};      // id -> { sha, data }
+let active = DOCS[0].id;
+
+// ── GitHub API ──────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/${path}`, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.status === 204 ? null : res.json();
+}
+async function readDoc(doc) {
+  const j = await api(`contents/${doc.file}?ref=${BRANCH}`);
+  return { sha: j.sha, data: JSON.parse(unb64(j.content)) };
+}
+async function writeDoc(doc, message) {
+  const { sha, data } = state[doc.id];
+  const j = await api(`contents/${doc.file}`, {
+    method: 'PUT',
+    body: JSON.stringify({ message, content: b64(JSON.stringify(data, null, 2) + '\n'), sha, branch: BRANCH }),
+  });
+  state[doc.id].sha = j.content.sha;
+}
+async function uploadImage(file) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const name = `${slug(file.name.replace(/\.[^.]+$/, ''))}-${Date.now().toString().slice(-6)}.${ext}`;
+  await api(`contents/public/images/${name}`, {
+    method: 'PUT',
+    body: JSON.stringify({ message: `фото: ${name}`, content: await fileToB64(file), branch: BRANCH }),
+  });
+  return `/images/${name}`;
+}
+
+// ── Отрисовка формы ─────────────────────────────────────────────────────────
+function fieldEl(spec, obj, key) {
+  const label = el('label', {}, spec.label);
+  if (spec.type === 'image') {
+    const box = el('div', { class: 'imgrow' });
+    const left = el('div');
+    const thumb = el('img', { class: 'thumb', alt: '' });
+    thumb.src = imgUrl(obj[key]);
+    const input = el('input', { type: 'text' });
+    input.value = obj[key] || '';
+    input.oninput = () => { obj[key] = input.value; thumb.src = imgUrl(input.value); };
+    const file = el('input', { type: 'file', accept: 'image/*' });
+    file.onchange = async () => {
+      if (!file.files[0]) return;
+      try {
+        toast('Загружаю фото…');
+        const path = await uploadImage(file.files[0]);
+        obj[key] = path; input.value = path; thumb.src = imgUrl(path);
+        toast('Фото загружено. Не забудьте «Сохранить».');
+      } catch (e) { toast('Ошибка загрузки: ' + e.message); }
+    };
+    left.append(label, thumb, input, el('p', { class: 'hint' }, 'Можно вставить путь вручную или выбрать файл (загрузится в public/images).'), file);
+    box.append(left);
+    return box;
+  }
+  let input;
+  if (spec.type === 'textarea') { input = el('textarea'); input.value = obj[key] || ''; }
+  else if (spec.type === 'number') { input = el('input', { type: 'number' }); input.value = obj[key] ?? ''; }
+  else { input = el('input', { type: 'text' }); input.value = obj[key] || ''; }
+  input.oninput = () => { obj[key] = spec.type === 'number' ? (input.value === '' ? '' : Number(input.value)) : input.value; };
+  return el('div', {}, label, input);
+}
+function fieldsEl(fields, obj) {
+  const frag = document.createDocumentFragment();
+  for (const f of fields) {
+    if (f.type === 'group') {
+      obj[f.key] = obj[f.key] || {};
+      frag.append(el('fieldset', {}, el('legend', {}, f.label), fieldsEl(f.fields, obj[f.key])));
+    } else if (f.type === 'list') {
+      obj[f.key] = obj[f.key] || [];
+      frag.append(listEl(f, obj[f.key]));
+    } else {
+      frag.append(fieldEl(f, obj, f.key));
+    }
+  }
+  return frag;
+}
+function listEl(spec, arr) {
+  const box = el('div');
+  const draw = () => {
+    box.innerHTML = '';
+    arr.forEach((item, i) => {
+      const row = el('div', { class: 'item' });
+      row.append(el('div', { class: 'item-head' },
+        el('span', {}, `${spec.label} ${i + 1}`),
+        el('button', { class: 'btn sm ghost', type: 'button', onclick: () => { arr.splice(i, 1); draw(); } }, 'Удалить')));
+      if (spec.item.fields) {
+        if (typeof item !== 'object' || item === null) arr[i] = item = {};
+        row.append(fieldsEl(spec.item.fields, item));
+      } else {
+        const input = el('input', { type: 'text' });
+        input.value = item || '';
+        input.oninput = () => { arr[i] = input.value; };
+        row.append(el('label', {}, 'Значение'), input);
+      }
+      box.append(row);
+    });
+    box.append(el('button', { class: 'btn sm', type: 'button', onclick: () => { arr.push(spec.item.fields ? {} : ''); draw(); } }, '+ Добавить'));
+  };
+  draw();
+  return el('fieldset', {}, el('legend', {}, spec.label), box);
+}
+
+function renderApp() {
+  const app = $('#app');
+  app.innerHTML = '';
+  if (!token) return renderLogin(app);
+
+  const tabs = el('div', { class: 'tabs' });
+  for (const d of DOCS) {
+    tabs.append(el('button', { class: 'tab' + (d.id === active ? ' on' : ''), type: 'button', onclick: () => { active = d.id; renderApp(); } }, d.label));
+  }
+  app.append(tabs);
+  const doc = DOCS.find((d) => d.id === active);
+  const wrap = el('div', { id: 'form' });
+  app.append(wrap);
+  wrap.append(fieldsEl(doc.fields, state[doc.id].data));
+  $('#bar').hidden = false;
+  $('#status').textContent = `Редактируем: ${doc.label}`;
+}
+
+function renderLogin(app) {
+  $('#bar').hidden = true;
+  const box = el('div', { class: 'login' });
+  box.append(el('h2', {}, 'Вход в админку'));
+  box.append(el('p', {}, 'Нужен токен GitHub с правом «Contents: Read and write» на репозиторий сайта. Он хранится только в вашем браузере.'));
+  box.append(el('ol', {}, el('li', {}, 'Откройте github.com/settings/personal-access-tokens/new'), el('li', {}, 'Repository access → Only select repositories → evakuator-bryansk'), el('li', {}, 'Permissions → Repository permissions → Contents → Read and write'), el('li', {}, 'Generate token и вставьте его сюда')));
+  const input = el('input', { type: 'text', placeholder: 'github_pat_…' });
+  const btn = el('button', { class: 'btn primary', type: 'button' }, 'Войти');
+  btn.onclick = async () => {
+    token = input.value.trim();
+    if (!token) return;
+    localStorage.setItem('gh_token', token);
+    await boot();
+  };
+  box.append(el('label', {}, 'Токен GitHub'), input, el('div', { style: 'margin-top:12px' }, btn));
+  app.append(box);
+}
+
+async function boot() {
+  try {
+    $('#who').textContent = 'загрузка…';
+    for (const d of DOCS) state[d.id] = await readDoc(d);
+    $('#who').textContent = 'подключено';
+    $('#logout').hidden = false;
+    renderApp();
+  } catch (e) {
+    $('#who').textContent = '';
+    toast('Не удалось подключиться: ' + e.message);
+    token = '';
+    localStorage.removeItem('gh_token');
+    renderApp();
+  }
+}
+
+$('#save').onclick = async () => {
+  const doc = DOCS.find((d) => d.id === active);
+  try {
+    $('#save').disabled = true;
+    $('#status').textContent = 'Сохраняю…';
+    await writeDoc(doc, `админка: правка «${doc.label}»`);
+    $('#status').textContent = `Сохранено. Сайт пересоберётся автоматически (1–2 мин).`;
+    toast('Сохранено ✓');
+  } catch (e) {
+    toast('Ошибка: ' + e.message);
+    $('#status').textContent = 'Не сохранилось';
+  } finally {
+    $('#save').disabled = false;
+  }
+};
+$('#logout').onclick = () => { token = ''; localStorage.removeItem('gh_token'); $('#logout').hidden = true; renderApp(); };
+
+if (token) boot(); else renderApp();
+</script>
+</body>
+</html>
